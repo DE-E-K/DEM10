@@ -29,7 +29,7 @@ def heartbeat_stream(customer_count: int, invalid_ratio: float = 0.0) -> Iterato
             timestamp = timestamp - timedelta(seconds=random.randint(1, 8))
 
         if random.random() < invalid_ratio:
-            heart_rate = random.choice([-5, 260])
+            heart_rate = random.choice([30, 220])
         else:
             heart_rate = _sample_heart_rate()
 

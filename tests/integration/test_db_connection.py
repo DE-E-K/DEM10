@@ -5,7 +5,7 @@ import psycopg
 
 def test_postgres_connection_smoke() -> None:
     host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
+    port = os.getenv("POSTGRES_PORT", "55432")
     db = os.getenv("POSTGRES_DB", "heartbeat")
     user = os.getenv("POSTGRES_USER", "heartbeat_user")
     password = os.getenv("POSTGRES_PASSWORD", "heartbeat_pass")

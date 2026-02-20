@@ -7,7 +7,7 @@ load_dotenv()
 
 @dataclass(frozen=True)
 class Settings:
-    kafka_bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    kafka_bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
     kafka_topic_raw: str = os.getenv("KAFKA_TOPIC_RAW", "events.raw.v1")
     kafka_topic_invalid: str = os.getenv("KAFKA_TOPIC_INVALID", "events.invalid.v1")
     kafka_topic_anomaly: str = os.getenv("KAFKA_TOPIC_ANOMALY", "events.anomaly.v1")
@@ -16,7 +16,7 @@ class Settings:
     kafka_consumer_group_anomaly: str = os.getenv("KAFKA_CONSUMER_GROUP_ANOMALY", "cg.anomaly.v1")
 
     postgres_host: str = os.getenv("POSTGRES_HOST", "localhost")
-    postgres_port: int = int(os.getenv("POSTGRES_PORT", "5432"))
+    postgres_port: int = int(os.getenv("POSTGRES_PORT", "55432"))
     postgres_db: str = os.getenv("POSTGRES_DB", "heartbeat")
     postgres_user: str = os.getenv("POSTGRES_USER", "heartbeat_user")
     postgres_password: str = os.getenv("POSTGRES_PASSWORD", "heartbeat_pass")

@@ -1,5 +1,5 @@
 $bootstrap = $env:KAFKA_BOOTSTRAP_SERVERS
-if (-not $bootstrap) { $bootstrap = "localhost:9092" }
+if (-not $bootstrap) { $bootstrap = "localhost:19092" }
 
 $topics = @(
   @{ name = "events.raw.v1"; partitions = 24 },

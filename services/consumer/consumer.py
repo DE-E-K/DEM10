@@ -31,6 +31,10 @@ def main() -> None:
             try:
                 payload = json.loads(payload_raw)
                 event = HeartbeatEvent.model_validate(payload)
+                if event.heart_rate < settings.heart_rate_min or event.heart_rate > settings.heart_rate_max:
+                    raise ValueError(
+                        f"heart_rate outside allowed range [{settings.heart_rate_min}, {settings.heart_rate_max}]"
+                    )
                 insert_heartbeat(conn, event, msg.topic(), msg.partition(), msg.offset())
                 upsert_checkpoint(conn, settings.kafka_consumer_group_db, msg.topic(), msg.partition(), msg.offset())
                 conn.commit()

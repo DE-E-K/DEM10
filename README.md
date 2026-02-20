@@ -36,6 +36,18 @@ This project simulates customer heart rate streams, ingests them through Kafka, 
    - `docker compose -f docker/compose/docker-compose.yml up -d`
 4. Create Kafka topics:
    - `./scripts/create-topics.ps1`
+   - If PowerShell policy blocks scripts, run directly:
+     - `docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.raw.v1 --partitions 24 --replication-factor 1`
+     - `docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.invalid.v1 --partitions 6 --replication-factor 1`
+     - `docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.anomaly.v1 --partitions 6 --replication-factor 1`
+     - `docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.dlq.v1 --partitions 6 --replication-factor 1`
+
+## Local Ports
+- Kafka bootstrap (host): `localhost:19092`
+- PostgreSQL (host): `localhost:55432`
+- Grafana: `http://localhost:3000`
+- Prometheus: `http://localhost:9090`
+- Kafka UI: `http://localhost:8080`
 
 ## Run Pipeline
 Open 3 terminals (with `.venv` activated):
@@ -51,8 +63,8 @@ Optional sample generator output:
 
 ## Query Data
 Use psql (or any SQL client):
-- `SELECT * FROM heartbeat_events ORDER BY event_time DESC LIMIT 20;`
-- `SELECT * FROM anomalies ORDER BY event_time DESC LIMIT 20;`
+- `psql -h localhost -p 55432 -U heartbeat_user -d heartbeat -c "SELECT * FROM heartbeat_events ORDER BY event_time DESC LIMIT 20;"`
+- `psql -h localhost -p 55432 -U heartbeat_user -d heartbeat -c "SELECT * FROM anomalies ORDER BY event_time DESC LIMIT 20;"`
 
 ## Tests
 - Unit: `pytest tests/unit -q`
