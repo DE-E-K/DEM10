@@ -1,0 +1,32 @@
+{
+  "title": "Heartbeat Monitoring Overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Heartbeats per Minute",
+      "datasource": "PostgreSQL",
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('minute', event_time) AS time, count(*)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '1 hour' GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Anomalies per Minute",
+      "datasource": "PostgreSQL",
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('minute', event_time) AS time, count(*)::double precision AS value FROM anomalies WHERE event_time > now() - interval '1 hour' GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    }
+  ]
+}
