@@ -1,0 +1,228 @@
+# =============================================================================
+# docker-compose.yml  –  Local development stack for the Heartbeat Pipeline
+# =============================================================================
+# Place this file at the project root and run:
+#
+#   docker compose up -d
+#
+# This starts all infrastructure components:
+#   • Zookeeper   (Kafka coordination service)
+#   • Kafka       (message broker)
+#   • PostgreSQL  (persistent event store)
+#   • Prometheus  (metrics collection)
+#   • Grafana     (dashboards and visualisation)
+#   • Kafka UI    (topic / consumer group browser)
+#
+# Port mapping (host → container)
+# ────────────────────────────────
+#   Kafka         localhost:19092 → 19092
+#   PostgreSQL    localhost:55432 → 5432
+#   Grafana       localhost:3000  → 3000
+#   Prometheus    localhost:9090  → 9090
+#   Kafka UI      localhost:8080  → 8080
+#   Zookeeper     localhost:22181 → 2181  (management only; not needed by app)
+# =============================================================================
+
+services:
+
+  # Zookeeper
+  # Kafka's coordination service.  Required by the Confluent Kafka image.
+  # In KRaft-mode Kafka (v3.3+) Zookeeper is no longer needed, but the
+  # confluentinc image used here still relies on it.
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: heartbeat-zookeeper
+    restart: unless-stopped # Restart automatically on crash or Docker restart
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+        # Basic time unit in ms (hearbeat / session timeouts
+        # are multiples of TICK_TIME)
+    ports:
+      - "22181:2181"
+    healthcheck:
+      test: [ "CMD-SHELL", "echo ruok | nc -w 2 localhost 2181 | grep imok" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Kafka
+  # Single-broker Kafka cluster for local development.
+  # Two listener configs:
+  #   PLAINTEXT://kafka:29092  → used by containers inside the Docker network
+  #   PLAINTEXT_HOST://localhost:19092  → used by Python services on the host
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: heartbeat-kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy # Don't start Kafka until Zookeeper is healthy
+    ports:
+      - "19092:19092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Two listeners: internal (for Docker containers) + external (for host)
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:19092
+      # Single-broker settings (replication factor = 1 is fine for local dev)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      # Default partition count for auto-created topics (explicit creation preferred)
+      KAFKA_NUM_PARTITIONS: 24
+      # Retention: keep raw data for 7 days (168 hours), limit partition size to 1 GB
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+    healthcheck:
+      # List topics to verify the broker is fully initialised
+      test: [ "CMD", "bash", "-c", "kafka-topics --bootstrap-server localhost:19092 --list" ]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+  # PostgreSQL
+  # Persistent relational store for heartbeat events, anomalies, and offsets.
+  # Schema is auto-applied from db/schema/ on first container start.
+  postgres:
+    image: postgres:16
+    container_name: heartbeat-postgres
+    restart: unless-stopped
+    ports:
+      - "55432:5432" # Non-standard host port to avoid conflicts
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-heartbeat}
+      POSTGRES_USER: ${POSTGRES_USER:-heartbeat_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-heartbeat_pass}
+    volumes:
+      # Named volume: data survives container restarts / recreations
+      - postgres_data:/var/lib/postgresql/data
+      # SQL schema files are executed alphabetically on first start only
+      - ./db/schema:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-heartbeat_user} -d ${POSTGRES_DB:-heartbeat}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Prometheus
+  # Scrapes /metrics from each Python service and stores time-series metrics.
+  # The scrape configuration is in monitoring/prometheus/prometheus.yml.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: heartbeat-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  # Grafana
+  # Visualisation layer.  Dashboards and datasources are pre-provisioned from
+  # monitoring/grafana/provisioning/ so they appear on first start.
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: heartbeat-grafana
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD:-admin}
+      # Disable the mandatory change of default password prompt
+      GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "false"
+    volumes:
+      # Pre-provisioned datasources (PostgreSQL + Prometheus)
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      # Pre-provisioned dashboards
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  # Kafka UI
+  # Browser-based interface for inspecting topics, consumer groups, and messages.
+  # Access at http://localhost:8080
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: heartbeat-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092 # Internal Docker network address
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+
+  # Producer
+  # Generates synthetic heartbeat events and publishes them to events.raw.v1.
+  producer:
+    build:
+      context: . # Project root (services/ must be importable)
+      dockerfile: services/producer/Dockerfile
+    container_name: heartbeat-producer
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    env_file: .env # Kafka / DB settings from .env
+    environment:
+      # Override bootstrap server to use the internal Docker network address
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports:
+      - "8000:8000" # Prometheus /metrics
+
+  # Consumer (DB writer)
+  # Reads from events.raw.v1, validates, and persists to PostgreSQL.
+  consumer:
+    build:
+      context: .
+      dockerfile: services/consumer/Dockerfile
+    container_name: heartbeat-consumer
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      POSTGRES_HOST: postgres # Container name = hostname inside Docker network
+      POSTGRES_PORT: 5432 # Internal Docker port (host maps 55432→5432)
+    ports:
+      - "8001:8001" # Prometheus /metrics (producer + 1)
+
+  # Anomaly Detector
+  # Reads from events.raw.v1 as a separate consumer group, detects anomalies,
+  # writes to the anomalies table, and publishes to events.anomaly.v1.
+  anomaly-detector:
+    build:
+      context: .
+      dockerfile: services/anomaly_detector/Dockerfile
+    container_name: heartbeat-anomaly-detector
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432 # Internal Docker port (host maps 55432→5432)
+    ports:
+      - "8002:8002" # Prometheus /metrics (producer + 2)
+
+# Named volumes
+volumes:
+  # PostgreSQL data volume: persists database files between container restarts.
+  # To reset the database: docker compose down -v  (WARNING: destroys all data)
+  postgres_data:

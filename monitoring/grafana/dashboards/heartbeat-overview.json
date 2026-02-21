@@ -1,12 +1,28 @@
 {
+  "uid": "heartbeat-overview-v2",
+  "id": 1,
   "title": "Heartbeat Monitoring Overview",
+  "description": "Real-time customer heartbeat pipeline – events, anomalies, and system health",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "tags": [
+    "heartbeat",
+    "realtime",
+    "kafka",
+    "postgres"
+  ],
   "panels": [
     {
+      "id": 1,
       "type": "timeseries",
-      "title": "Heartbeats per Minute",
+      "title": "Heartbeats Ingested per Minute",
+      "description": "Count of valid heartbeat events written to PostgreSQL each minute. Drops indicate consumer lag or DB pressure.",
       "datasource": "PostgreSQL",
       "targets": [
         {
@@ -14,11 +30,30 @@
           "rawSql": "SELECT date_trunc('minute', event_time) AS time, count(*)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '1 hour' GROUP BY 1 ORDER BY 1"
         }
       ],
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        }
+      }
     },
     {
+      "id": 2,
       "type": "timeseries",
-      "title": "Anomalies per Minute",
+      "title": "Anomalies Detected per Minute",
+      "description": "Count of anomalous readings (LOW, HIGH, SPIKE) detected each minute. Sustained elevation warrants investigation.",
       "datasource": "PostgreSQL",
       "targets": [
         {
@@ -26,7 +61,176 @@
           "rawSql": "SELECT date_trunc('minute', event_time) AS time, count(*)::double precision AS value FROM anomalies WHERE event_time > now() - interval '1 hour' GROUP BY 1 ORDER BY 1"
         }
       ],
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "fixedColor": "orange",
+            "mode": "fixed"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "barchart",
+      "title": "Anomaly Breakdown by Type (Last Hour)",
+      "description": "Distribution of anomaly types in the past hour. HIGH_HEART_RATE and LOW_HEART_RATE are severity=high; SPIKE is severity=medium.",
+      "datasource": "PostgreSQL",
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT anomaly_type, count(*) AS count FROM anomalies WHERE event_time > now() - interval '1 hour' GROUP BY anomaly_type ORDER BY count DESC"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Average Heart Rate (Last 5 min)",
+      "description": "Population-wide mean heart rate across all customers in the most recent 5-minute window.",
+      "datasource": "PostgreSQL",
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT round(avg(heart_rate)::numeric, 1)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '5 minutes'"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "Avg BPM",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 60
+              },
+              {
+                "color": "orange",
+                "value": 120
+              },
+              {
+                "color": "red",
+                "value": 140
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "p95 Heart Rate (Last 5 min)",
+      "description": "95th percentile heart rate — the threshold below which 95% of readings fall. High values indicate widespread elevated activity.",
+      "datasource": "PostgreSQL",
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY heart_rate)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '5 minutes'"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "p95 BPM",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 130
+              },
+              {
+                "color": "red",
+                "value": 160
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Active Customers (Last 5 min)",
+      "description": "Number of distinct customers who sent at least one reading in the last 5 minutes. Sudden drops may indicate producer or Kafka issues.",
+      "datasource": "PostgreSQL",
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT count(DISTINCT customer_id)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '5 minutes'"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "Active Customers"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Recent Anomalies",
+      "description": "The 20 most recent anomaly records. Use this panel to quickly identify which customers triggered alerts.",
+      "datasource": "PostgreSQL",
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT event_time, customer_id, heart_rate, anomaly_type, severity FROM anomalies ORDER BY event_time DESC LIMIT 20"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      }
     }
   ]
 }

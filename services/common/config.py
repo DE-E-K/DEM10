@@ -1,38 +1,163 @@
-import os
-from dataclasses import dataclass
-from dotenv import load_dotenv
+"""
+config.py – Centralised, validated application settings.
 
-load_dotenv()
+Uses pydantic-settings so every environment variable is:
+  • Type-coerced (str, int, float, bool)
+  • Range-checkable via Field/validator
+  • Auto-documented via the field descriptions
+  • Clearly reported on misconfiguration instead of crashing deep in the app
 
+Usage
+-----
+>>> from services.common.config import settings
+>>> print(settings.kafka_bootstrap_servers)
+"""
 
-@dataclass(frozen=True)
-class Settings:
-    kafka_bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
-    kafka_topic_raw: str = os.getenv("KAFKA_TOPIC_RAW", "events.raw.v1")
-    kafka_topic_invalid: str = os.getenv("KAFKA_TOPIC_INVALID", "events.invalid.v1")
-    kafka_topic_anomaly: str = os.getenv("KAFKA_TOPIC_ANOMALY", "events.anomaly.v1")
-    kafka_topic_dlq: str = os.getenv("KAFKA_TOPIC_DLQ", "events.dlq.v1")
-    kafka_consumer_group_db: str = os.getenv("KAFKA_CONSUMER_GROUP_DB", "cg.db-writer.v1")
-    kafka_consumer_group_anomaly: str = os.getenv("KAFKA_CONSUMER_GROUP_ANOMALY", "cg.anomaly.v1")
-
-    postgres_host: str = os.getenv("POSTGRES_HOST", "localhost")
-    postgres_port: int = int(os.getenv("POSTGRES_PORT", "55432"))
-    postgres_db: str = os.getenv("POSTGRES_DB", "heartbeat")
-    postgres_user: str = os.getenv("POSTGRES_USER", "heartbeat_user")
-    postgres_password: str = os.getenv("POSTGRES_PASSWORD", "heartbeat_pass")
-
-    sim_customer_count: int = int(os.getenv("SIM_CUSTOMER_COUNT", "1000"))
-    sim_events_per_second: int = int(os.getenv("SIM_EVENTS_PER_SECOND", "200"))
-    sim_burst_multiplier: int = int(os.getenv("SIM_BURST_MULTIPLIER", "4"))
-    sim_sleep_seconds: float = float(os.getenv("SIM_SLEEP_SECONDS", "0.2"))
-    sim_invalid_ratio: float = float(os.getenv("SIM_INVALID_RATIO", "0.02"))
-
-    heart_rate_min: int = int(os.getenv("HEART_RATE_MIN", "45"))
-    heart_rate_max: int = int(os.getenv("HEART_RATE_MAX", "185"))
-
-    anomaly_low_threshold: int = int(os.getenv("ANOMALY_LOW_THRESHOLD", "50"))
-    anomaly_high_threshold: int = int(os.getenv("ANOMALY_HIGH_THRESHOLD", "140"))
-    anomaly_spike_delta: int = int(os.getenv("ANOMALY_SPIKE_DELTA", "30"))
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class Settings(BaseSettings):
+    """
+    All runtime configuration is pulled from environment variables (or .env).
+
+    Sections
+    --------
+    kafka_*         – Kafka broker and topic names / consumer groups
+    postgres_*      – PostgreSQL connection parameters
+    db_pool_*       – psycopg connection-pool sizing
+    sim_*           – Synthetic-data simulation knobs
+    heart_rate_*    – Hard physiological bounds for rate validation
+    anomaly_*       – Anomaly detection thresholds
+    log_level       – Root Python logging level (DEBUG / INFO / WARNING / ERROR)
+    prometheus_port – Port on which each service exposes /metrics for Prometheus scraping
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",           # Load from .env if present
+        env_file_encoding="utf-8",
+        case_sensitive=False,      # KAFKA_BOOTSTRAP_SERVERS == kafka_bootstrap_servers
+        extra="ignore",            # Silently ignore unknown env vars
+    )
+
+    # Kafka 
+    kafka_bootstrap_servers: str = Field(
+        default="localhost:19092",
+        description="Comma-separated list of Kafka broker host:port pairs.",
+    )
+    kafka_topic_raw: str = Field(
+        default="events.raw.v1",
+        description="Topic where the producer publishes validated heartbeat events.",
+    )
+    kafka_topic_invalid: str = Field(
+        default="events.invalid.v1",
+        description="Quarantine topic for messages that fail schema/domain validation.",
+    )
+    kafka_topic_anomaly: str = Field(
+        default="events.anomaly.v1",
+        description="Topic where the anomaly detector publishes flagged events.",
+    )
+    kafka_topic_dlq: str = Field(
+        default="events.dlq.v1",
+        description="Dead-letter queue for messages that caused unexpected processing errors.",
+    )
+    kafka_consumer_group_db: str = Field(
+        default="cg.db-writer.v1",
+        description="Consumer group used by the DB-writer consumer.",
+    )
+    kafka_consumer_group_anomaly: str = Field(
+        default="cg.anomaly.v1",
+        description="Consumer group used by the anomaly-detection consumer.",
+    )
+
+    # PostgreSQL
+    postgres_host: str = Field(default="localhost")
+    postgres_port: int = Field(default=55432, ge=1, le=65535)
+    postgres_db: str = Field(default="heartbeat")
+    postgres_user: str = Field(default="heartbeat_user")
+    postgres_password: str = Field(default="heartbeat_pass")
+
+    # Connection pool
+    db_pool_min: int = Field(
+        default=2,
+        ge=1,
+        description="Minimum number of idle connections kept alive in the pool.",
+    )
+    db_pool_max: int = Field(
+        default=10,
+        ge=1,
+        description="Maximum number of connections the pool will open simultaneously.",
+    )
+
+    # Simulation
+    sim_customer_count: int = Field(
+        default=1000,
+        ge=1,
+        description="Number of synthetic customer identities to simulate.",
+    )
+    sim_events_per_second: int = Field(
+        default=200,
+        ge=1,
+        description="Target ingestion rate in events/s (normal mode).",
+    )
+    sim_burst_multiplier: int = Field(
+        default=4,
+        ge=1,
+        description="Multiplier applied during burst windows (every 10 s).",
+    )
+    sim_sleep_seconds: float = Field(
+        default=0.2,
+        ge=0.0,
+        description="Sleep between producer batch iterations (seconds).",
+    )
+    sim_invalid_ratio: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of generated events that are deliberately out-of-range.",
+    )
+
+    # Heart-rate domain bounds
+    heart_rate_min: int = Field(
+        default=45,
+        ge=0,
+        description="Minimum acceptable heart rate (bpm). Events below this are invalid.",
+    )
+    heart_rate_max: int = Field(
+        default=185,
+        ge=1,
+        description="Maximum acceptable heart rate (bpm). Events above this are invalid.",
+    )
+
+    # Anomaly detection thresholds
+    anomaly_low_threshold: int = Field(
+        default=50,
+        ge=0,
+        description="Heart rate at or below this value triggers a LOW_HEART_RATE anomaly.",
+    )
+    anomaly_high_threshold: int = Field(
+        default=140,
+        ge=1,
+        description="Heart rate at or above this value triggers a HIGH_HEART_RATE anomaly.",
+    )
+    anomaly_spike_delta: int = Field(
+        default=30,
+        ge=1,
+        description="Absolute bpm change from the customer's last reading that triggers a SPIKE anomaly.",
+    )
+
+    # Observability─
+    log_level: str = Field(
+        default="INFO",
+        description="Root Python logging level. One of: DEBUG, INFO, WARNING, ERROR, CRITICAL.",
+    )
+    prometheus_port: int = Field(
+        default=8000,
+        ge=1024,
+        le=65535,
+        description="HTTP port on which each service exposes /metrics for Prometheus scraping.",
+    )
+
+
+# Module-level singleton – import this everywhere instead of instantiating Settings again.
 settings = Settings()
