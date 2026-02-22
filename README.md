@@ -174,7 +174,7 @@ psql -h localhost -p 55432 -U $env:POSTGRES_USER -d $env:POSTGRES_DB -c "SELECT 
 
 | Service | URL | Credentials |
 |---|---|---|
-| Grafana | http://localhost:3000 | admin / admin |
+| Grafana | http://localhost:3000 | admin / admin (default)|
 | Prometheus | http://localhost:9090 | – |
 | Kafka UI | http://localhost:8080 | – |
 | Producer /metrics | http://localhost:8000/metrics | – |
@@ -208,7 +208,9 @@ python tests/load/load_smoke.py
 
 ## Grafana Dashboard Panels
 Dashboard preview:
-<img width="904" height="843" alt="dashboard-preview" src="docs/screenshots/grafana-dashboard.png"/>
+
+<img width="1918" height="1059" alt="Dashboard Preview" src="https://github.com/user-attachments/assets/26df5d5f-f4ca-4be9-862f-4cded6e95549" />
+
 1. **Heartbeats Ingested per Minute** – ingestion timeseries
 2. **Anomalies per Minute** – anomaly rate timeseries
 3. **Anomaly Breakdown by Type** – bar chart (LOW / HIGH / SPIKE)
