@@ -1,7 +1,25 @@
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
 
 scrape_configs:
+  # Prometheus self-monitoring
   - job_name: prometheus
     static_configs:
       - targets: ["prometheus:9090"]
+
+  # Heartbeat pipeline Python services
+  - job_name: heartbeat_producer
+    static_configs:
+      - targets: ["producer:8000"]
+    metrics_path: /metrics
+
+  - job_name: heartbeat_consumer
+    static_configs:
+      - targets: ["consumer:8001"]
+    metrics_path: /metrics
+
+  - job_name: heartbeat_anomaly_detector
+    static_configs:
+      - targets: ["anomaly-detector:8002"]
+    metrics_path: /metrics

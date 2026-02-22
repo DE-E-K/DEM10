@@ -11,9 +11,9 @@ datasources:
     type: postgres
     access: proxy
     url: postgres:5432
-    user: heartbeat_user
+    user: heartbeat
     secureJsonData:
-      password: heartbeat_pass
+      password: heartbeat
     jsonData:
       database: heartbeat
       sslmode: disable
