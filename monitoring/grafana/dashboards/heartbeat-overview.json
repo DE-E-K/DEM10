@@ -23,11 +23,19 @@
       "type": "timeseries",
       "title": "Heartbeats Ingested per Minute",
       "description": "Count of valid heartbeat events written to PostgreSQL each minute. Drops indicate consumer lag or DB pressure.",
-      "datasource": "PostgreSQL",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
       "targets": [
         {
+          "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT date_trunc('minute', event_time) AS time, count(*)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '1 hour' GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT date_trunc('minute', event_time) AS time, count(*)::double precision AS value FROM heartbeat_events WHERE $__timeFilter(event_time) GROUP BY 1 ORDER BY 1",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "PCC52D03280B7034C"
+          }
         }
       ],
       "gridPos": {
@@ -54,11 +62,19 @@
       "type": "timeseries",
       "title": "Anomalies Detected per Minute",
       "description": "Count of anomalous readings (LOW, HIGH, SPIKE) detected each minute. Sustained elevation warrants investigation.",
-      "datasource": "PostgreSQL",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
       "targets": [
         {
+          "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT date_trunc('minute', event_time) AS time, count(*)::double precision AS value FROM anomalies WHERE event_time > now() - interval '1 hour' GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT date_trunc('minute', event_time) AS time, count(*)::double precision AS value FROM anomalies WHERE $__timeFilter(event_time) GROUP BY 1 ORDER BY 1",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "PCC52D03280B7034C"
+          }
         }
       ],
       "gridPos": {
@@ -86,11 +102,19 @@
       "type": "barchart",
       "title": "Anomaly Breakdown by Type (Last Hour)",
       "description": "Distribution of anomaly types in the past hour. HIGH_HEART_RATE and LOW_HEART_RATE are severity=high; SPIKE is severity=medium.",
-      "datasource": "PostgreSQL",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
       "targets": [
         {
+          "refId": "A",
           "format": "table",
-          "rawSql": "SELECT anomaly_type, count(*) AS count FROM anomalies WHERE event_time > now() - interval '1 hour' GROUP BY anomaly_type ORDER BY count DESC"
+          "rawSql": "SELECT anomaly_type, count(*) AS count FROM anomalies WHERE event_time > now() - interval '1 hour' GROUP BY anomaly_type ORDER BY count DESC",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "PCC52D03280B7034C"
+          }
         }
       ],
       "gridPos": {
@@ -105,11 +129,19 @@
       "type": "stat",
       "title": "Average Heart Rate (Last 5 min)",
       "description": "Population-wide mean heart rate across all customers in the most recent 5-minute window.",
-      "datasource": "PostgreSQL",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
       "targets": [
         {
+          "refId": "A",
           "format": "table",
-          "rawSql": "SELECT round(avg(heart_rate)::numeric, 1)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '5 minutes'"
+          "rawSql": "SELECT round(avg(heart_rate)::numeric, 1)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '5 minutes'",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "PCC52D03280B7034C"
+          }
         }
       ],
       "gridPos": {
@@ -151,11 +183,19 @@
       "type": "stat",
       "title": "p95 Heart Rate (Last 5 min)",
       "description": "95th percentile heart rate — the threshold below which 95% of readings fall. High values indicate widespread elevated activity.",
-      "datasource": "PostgreSQL",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
       "targets": [
         {
+          "refId": "A",
           "format": "table",
-          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY heart_rate)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '5 minutes'"
+          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY heart_rate)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '5 minutes'",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "PCC52D03280B7034C"
+          }
         }
       ],
       "gridPos": {
@@ -193,11 +233,19 @@
       "type": "stat",
       "title": "Active Customers (Last 5 min)",
       "description": "Number of distinct customers who sent at least one reading in the last 5 minutes. Sudden drops may indicate producer or Kafka issues.",
-      "datasource": "PostgreSQL",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
       "targets": [
         {
+          "refId": "A",
           "format": "table",
-          "rawSql": "SELECT count(DISTINCT customer_id)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '5 minutes'"
+          "rawSql": "SELECT count(DISTINCT customer_id)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '10 minutes'",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "PCC52D03280B7034C"
+          }
         }
       ],
       "gridPos": {
@@ -218,11 +266,19 @@
       "type": "table",
       "title": "Recent Anomalies",
       "description": "The 20 most recent anomaly records. Use this panel to quickly identify which customers triggered alerts.",
-      "datasource": "PostgreSQL",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
       "targets": [
         {
+          "refId": "A",
           "format": "table",
-          "rawSql": "SELECT event_time, customer_id, heart_rate, anomaly_type, severity FROM anomalies ORDER BY event_time DESC LIMIT 20"
+          "rawSql": "SELECT event_time, customer_id, heart_rate, anomaly_type, severity FROM anomalies ORDER BY event_time DESC LIMIT 20",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "PCC52D03280B7034C"
+          }
         }
       ],
       "gridPos": {

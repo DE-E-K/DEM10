@@ -144,7 +144,50 @@ def _sample_heart_rate(resting: int) -> int:
 # Public streaming generator
 # =======================================================================
 
-def heartbeat_stream(customer_count: int, invalid_ratio: float = 0.0,) -> Iterator[HeartbeatEvent]:
+def _resolve_active_customer_window(
+    customer_count: int,
+    dynamic_customers: bool,
+    active_customers_min: int,
+    active_customers_max: int,
+) -> tuple[int, int]:
+    """
+    Resolve and validate active-customer window bounds.
+
+    In static mode, the full customer pool remains active.
+    In dynamic mode, min/max bounds are clamped to [1, customer_count].
+    """
+    if not dynamic_customers:
+        return customer_count, customer_count
+
+    min_active = max(1, min(active_customers_min, customer_count))
+    max_active = max(1, min(active_customers_max, customer_count))
+
+    if min_active > max_active:
+        raise ValueError(
+            "active_customers_min cannot be greater than active_customers_max"
+        )
+
+    return min_active, max_active
+
+
+def _sample_active_customers(
+    customers: list[str],
+    min_active: int,
+    max_active: int,
+) -> list[str]:
+    """Return a random active subset of customers within configured bounds."""
+    active_count = random.randint(min_active, max_active)
+    return random.sample(customers, active_count)
+
+
+def heartbeat_stream(
+    customer_count: int,
+    invalid_ratio: float = 0.0,
+    dynamic_customers: bool = False,
+    active_customers_min: int | None = None,
+    active_customers_max: int | None = None,
+    active_set_refresh_probability: float = 0.03,
+) -> Iterator[HeartbeatEvent]:
     """
     Infinite generator that yields synthetic ``HeartbeatEvent`` objects.
 
@@ -162,18 +205,49 @@ def heartbeat_stream(customer_count: int, invalid_ratio: float = 0.0,) -> Iterat
     invalid_ratio:
         Fraction of events that should carry out-of-range heart-rate values.
         Set to ``0.0`` in tests to ensure clean data; ``0.02`` in production.
+    dynamic_customers:
+        If ``True``, emit events from a changing active subset of customers.
+        If ``False``, all customers are always active (legacy behaviour).
+    active_customers_min:
+        Minimum size of active subset in dynamic mode.
+    active_customers_max:
+        Maximum size of active subset in dynamic mode.
+    active_set_refresh_probability:
+        Probability per event to resample the active subset in dynamic mode.
 
     Yields
     ------
     HeartbeatEvent
         An unserialized domain event ready to be JSON-encoded and published.
     """
+    if not (0.0 <= active_set_refresh_probability <= 1.0):
+        raise ValueError("active_set_refresh_probability must be in [0.0, 1.0]")
+
     # Pre-build customer pool and stable baselines once, then keep reusing them
     customers = customer_id_pool(customer_count)
     baselines = _build_customer_baselines(customer_count)
 
+    min_active, max_active = _resolve_active_customer_window(
+        customer_count=customer_count,
+        dynamic_customers=dynamic_customers,
+        active_customers_min=(
+            active_customers_min if active_customers_min is not None else max(1, customer_count // 5)
+        ),
+        active_customers_max=(
+            active_customers_max if active_customers_max is not None else customer_count
+        ),
+    )
+
+    active_customers = _sample_active_customers(customers, min_active, max_active)
+
     while True:
-        customer_id = random.choice(customers)
+        if (
+            dynamic_customers
+            and random.random() < active_set_refresh_probability
+        ):
+            active_customers = _sample_active_customers(customers, min_active, max_active)
+
+        customer_id = random.choice(active_customers)
         resting = baselines[customer_id]
         timestamp = datetime.now(timezone.utc)
 

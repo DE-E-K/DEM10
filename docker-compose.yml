@@ -41,7 +41,7 @@ services:
     ports:
       - "22181:2181"
     healthcheck:
-      test: [ "CMD-SHELL", "echo ruok | nc -w 2 localhost 2181 | grep imok" ]
+      test: [ "CMD-SHELL", "nc -z 127.0.0.1 2181" ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -93,15 +93,15 @@ services:
       - "55432:5432" # Non-standard host port to avoid conflicts
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-heartbeat}
-      POSTGRES_USER: ${POSTGRES_USER:-heartbeat_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-heartbeat_pass}
+      POSTGRES_USER: ${POSTGRES_USER:-heartbeat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-heartbeat}
     volumes:
       # Named volume: data survives container restarts / recreations
       - postgres_data:/var/lib/postgresql/data
       # SQL schema files are executed alphabetically on first start only
       - ./db/schema:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-heartbeat_user} -d ${POSTGRES_DB:-heartbeat}" ]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-heartbeat} -d ${POSTGRES_DB:-heartbeat}" ]
       interval: 10s
       timeout: 5s
       retries: 10

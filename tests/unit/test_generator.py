@@ -93,6 +93,18 @@ class TestHeartbeatStream:
         event = next(stream)
         assert event.timestamp.tzinfo is not None
 
+    def test_dynamic_mode_respects_fixed_active_subset_size(self):
+        stream = heartbeat_stream(
+            customer_count=50,
+            invalid_ratio=0.0,
+            dynamic_customers=True,
+            active_customers_min=5,
+            active_customers_max=5,
+            active_set_refresh_probability=0.0,
+        )
+        seen_customer_ids = {next(stream).customer_id for _ in range(300)}
+        assert len(seen_customer_ids) == 5
+
 
 # ── Per-customer baseline stability ───────────────────────────────────────────
 

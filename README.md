@@ -8,34 +8,16 @@ detects physiological anomalies, and visualises everything in Grafana.
 
 ```mermaid
 flowchart LR
-        producer[Producer<br/>simulator]
-        consumer[Consumer<br/>DB Writer]
-        detector[Anomaly Detector]
-
-        heartbeat[(heartbeat_events)]
-        checkpoint[(ingest_checkpoint)]
-        anomalies[(anomalies)]
-        invalid[[events.invalid.v1<br/>schema/domain failures]]
-        dlq[[events.dlq.v1<br/>unexpected errors]]
-        anomaly_topic[[events.anomaly.v1]]
-
-        postgres[(PostgreSQL)]
-        prometheus[(Prometheus)]
-        grafana[Grafana<br/>7 panels + system metrics]
-
-        producer -->|events.raw.v1| consumer
-        producer -->|events.raw.v1| detector
-
-        consumer --> heartbeat
-        consumer --> checkpoint
-        consumer --> invalid
-        consumer --> dlq
-
-        detector --> anomalies
-        detector --> anomaly_topic
-
-        postgres --> grafana
-        prometheus --> grafana
+  G[Generator] --> P[Kafka Producer]
+  P --> K[(Kafka Topic events.raw.v1)]
+  K --> C[Consumer + DB Writer]
+  K --> A[Anomaly Detector]
+  C --> D[(PostgreSQL heartbeat_events)]
+  A --> AD[(PostgreSQL anomalies)]
+  A --> KA[(Kafka Topic events.anomaly.v1)]
+  D --> GR[Grafana]
+  AD --> GR
+  K --> UI[Kafka UI]
 ```
 
 ## Stack
@@ -151,11 +133,42 @@ python -m services.anomaly_detector.detector
 
 ```powershell
 # Count ingested events
-psql -h localhost -p 55432 -U heartbeat_user -d heartbeat -c "SELECT COUNT(*) FROM heartbeat_events;"
+psql -h localhost -p 55432 -U $env:POSTGRES_USER -d $env:POSTGRES_DB -c "SELECT COUNT(*) FROM heartbeat_events;"
 
 # View recent anomalies
-psql -h localhost -p 55432 -U heartbeat_user -d heartbeat -c "SELECT customer_id, anomaly_type, severity, heart_rate FROM anomalies ORDER BY event_time DESC LIMIT 10;"
+psql -h localhost -p 55432 -U $env:POSTGRES_USER -d $env:POSTGRES_DB -c "SELECT customer_id, anomaly_type, severity, heart_rate FROM anomalies ORDER BY event_time DESC LIMIT 10;"
 ```
+
+## Environment Variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092` | Kafka broker endpoint(s) |
+| `KAFKA_TOPIC_RAW` | `events.raw.v1` | Raw heartbeat topic |
+| `KAFKA_TOPIC_INVALID` | `events.invalid.v1` | Validation-failure quarantine topic |
+| `KAFKA_TOPIC_ANOMALY` | `events.anomaly.v1` | Anomaly events topic |
+| `KAFKA_TOPIC_DLQ` | `events.dlq.v1` | Dead-letter queue topic |
+| `KAFKA_CONSUMER_GROUP_DB` | `cg.db-writer.v1` | Consumer group for DB writer |
+| `KAFKA_CONSUMER_GROUP_ANOMALY` | `cg.anomaly.v1` | Consumer group for anomaly detector |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL host |
+| `POSTGRES_PORT` | `55432` | PostgreSQL port |
+| `POSTGRES_DB` | `heartbeat` | PostgreSQL database name |
+| `POSTGRES_USER` | `from .env` | PostgreSQL username |
+| `POSTGRES_PASSWORD` | `from .env` | PostgreSQL password |
+| `SIM_CUSTOMER_COUNT` | `1000` | Total simulated customer identities |
+| `SIM_EVENTS_PER_SECOND` | `200` | Base producer throughput per second |
+| `SIM_BURST_MULTIPLIER` | `4` | Burst multiplier every 10-second window |
+| `SIM_SLEEP_SECONDS` | `0.2` | Producer loop sleep interval (seconds) |
+| `SIM_INVALID_RATIO` | `0.02` | Fraction of deliberately invalid events |
+| `SIM_DYNAMIC_CUSTOMERS` | `false` | Enable dynamic active-customer subset |
+| `SIM_ACTIVE_CUSTOMERS_MIN` | `200` | Minimum active customers in dynamic mode |
+| `SIM_ACTIVE_CUSTOMERS_MAX` | `1000` | Maximum active customers in dynamic mode |
+| `SIM_ACTIVE_CUSTOMERS_REFRESH_PROBABILITY` | `0.03` | Probability to refresh active subset per event |
+| `HEART_RATE_MIN` | `45` | Domain minimum valid heart rate |
+| `HEART_RATE_MAX` | `185` | Domain maximum valid heart rate |
+| `ANOMALY_LOW_THRESHOLD` | `50` | Low-rate anomaly threshold |
+| `ANOMALY_HIGH_THRESHOLD` | `140` | High-rate anomaly threshold |
+| `ANOMALY_SPIKE_DELTA` | `30` | Spike anomaly delta threshold |
 
 ## Service Endpoints
 
@@ -194,7 +207,8 @@ python tests/load/load_smoke.py
 | `heartbeat_anomalies_total{type,severity}` | Detector | Anomalies detected (labelled) |
 
 ## Grafana Dashboard Panels
-
+Dashboard preview:
+<img width="904" height="843" alt="dashboard-preview" src="docs/screenshots/grafana-dashboard.png"/>
 1. **Heartbeats Ingested per Minute** – ingestion timeseries
 2. **Anomalies per Minute** – anomaly rate timeseries
 3. **Anomaly Breakdown by Type** – bar chart (LOW / HIGH / SPIKE)
@@ -213,10 +227,13 @@ python tests/load/load_smoke.py
 
 All thresholds are configurable via environment variables (`ANOMALY_LOW_THRESHOLD`, `ANOMALY_HIGH_THRESHOLD`, `ANOMALY_SPIKE_DELTA`).
 
+Simulation customer behavior is also configurable via `.env`: `SIM_DYNAMIC_CUSTOMERS`, `SIM_ACTIVE_CUSTOMERS_MIN`, `SIM_ACTIVE_CUSTOMERS_MAX`, and `SIM_ACTIVE_CUSTOMERS_REFRESH_PROBABILITY`.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| `dependency zookeeper failed to start` (or Zookeeper = `unhealthy`) | Healthcheck depends on `ruok` 4LW command, which may be unavailable/blocked in this image even when Zookeeper is running | Use TCP healthcheck `nc -z 127.0.0.1 2181` in Compose, then run `docker compose up -d --force-recreate zookeeper kafka` |
 | `Connection refused localhost:19092` | Kafka not ready | Wait for `docker compose ps` to show Kafka as healthy |
 | `Connection refused localhost:55432` | PostgreSQL not ready | Wait for `pg_isready` healthcheck to pass |
 | `ModuleNotFoundError: services` | Wrong working directory | Run commands from the project root |
@@ -226,10 +243,12 @@ All thresholds are configurable via environment variables (`ANOMALY_LOW_THRESHOL
 
 ## Architecture Documentation
 
-- Full architecture: `docs/architecture/architecture-overview.md`
-- Data-flow topology: `docs/architecture/topology.md`
-- Sequence diagram: `docs/architecture/sequence-ingest.md`
-- Windows notes: `docs/runbooks/windows-notes.md`
+- Full architecture: [docs/architecture/architecture-overview.md](docs/architecture/architecture-overview.md)
+- Data-flow topology: [docs/architecture/topology.md](docs/architecture/topology.md)
+- Sequence diagram: [docs/architecture/sequence-ingest.md](docs/architecture/sequence-ingest.md)
+
+## Runbooks
+- Windows notes: [docs/runbooks/windows-notes.md](docs/runbooks/windows-notes.md)
 
 ## Deliverables Mapping
 

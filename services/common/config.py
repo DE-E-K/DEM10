@@ -116,6 +116,26 @@ class Settings(BaseSettings):
         le=1.0,
         description="Fraction of generated events that are deliberately out-of-range.",
     )
+    sim_dynamic_customers: bool = Field(
+        default=False,
+        description="When true, events are emitted from a changing active subset of customers.",
+    )
+    sim_active_customers_min: int = Field(
+        default=200,
+        ge=1,
+        description="Minimum active customers when dynamic-customer mode is enabled.",
+    )
+    sim_active_customers_max: int = Field(
+        default=1000,
+        ge=1,
+        description="Maximum active customers when dynamic-customer mode is enabled.",
+    )
+    sim_active_customers_refresh_probability: float = Field(
+        default=0.03,
+        ge=0.0,
+        le=1.0,
+        description="Probability per event to resample the active customer subset in dynamic mode.",
+    )
 
     # Heart-rate domain bounds
     heart_rate_min: int = Field(

@@ -209,7 +209,9 @@ def main() -> None:
             except (ValidationError, ValueError, json.JSONDecodeError) as exc:
                 # Schema or domain validation failure — quarantine for audit
                 logger.warning(
-                    "Validation failure, routing to invalid topic",
+                    "Validation failure, routing to invalid topic | error=%s | payload=%s",
+                    str(exc),
+                    raw_payload[:200],
                     extra={"error": str(exc), "topic": settings.kafka_topic_invalid},
                 )
                 INVALID_TOTAL.inc()
