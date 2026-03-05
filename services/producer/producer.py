@@ -31,6 +31,7 @@ import json
 import logging
 import signal
 import sys
+import threading
 import time
 
 from confluent_kafka import KafkaException
@@ -61,21 +62,20 @@ PRODUCE_ERRORS = Counter(
     "Total number of messages that failed delivery confirmation from the broker.",
 )
 
-# Shutdown flag
-# Set to True by the signal handler; the main loop checks it after each batch.
-_shutdown_requested: bool = False
+# Shutdown event (thread-safe replacement for a plain bool flag).
+# signal handler calls .set(); main loop checks .is_set().
+_shutdown_event = threading.Event()
 
 
 def _handle_signal(signum: int, _frame) -> None:
     """
     Handle SIGINT / SIGTERM by requesting a graceful shutdown.
 
-    The main loop will see ``_shutdown_requested`` on its next iteration,
+    The main loop will see ``_shutdown_event`` on its next iteration,
     flush the producer, and exit cleanly rather than being killed mid-batch.
     """
-    global _shutdown_requested
     logger.info("Shutdown signal %d received — draining producer…", signum)
-    _shutdown_requested = True
+    _shutdown_event.set()
 
 
 def main() -> None:
@@ -133,7 +133,7 @@ def main() -> None:
     last_stats_time: float = time.monotonic()
 
     # Main publish loop
-    while not _shutdown_requested:
+    while not _shutdown_event.is_set():
         # Every 10 s we activate a burst window to simulate traffic spikes.
         # ``int(time.time()) % 10 == 0`` fires approximately once per 10-second
         # window, though with sub-second resolution it may fire for multiple
@@ -159,16 +159,21 @@ def main() -> None:
                     value=json.dumps(payload).encode("utf-8"),
                     on_delivery=on_delivery,
                 )
+            except BufferError:
+                # Internal librdkafka queue is full — back-pressure.
+                # Drain callbacks and retry once before moving on.
+                logger.warning("Producer queue full — draining callbacks…")
+                producer.poll(1.0)
+                PRODUCE_ERRORS.inc()
             except KafkaException as exc:
-                # Local queue full or broker connection lost — log and continue.
-                # The retry logic in the producer config handles transient errors.
+                # Broker connection lost or other Kafka error — log and continue.
                 logger.error("produce() call raised KafkaException: %s", exc)
                 PRODUCE_ERRORS.inc()
 
         # poll(0) drains the delivery callback queue without blocking.
-        # flush(1) ensures the internal queue doesn't grow unboundedly.
+        # NOTE: we no longer call flush() every iteration — it defeats async
+        # batching.  Flushing is reserved for graceful shutdown below.
         producer.poll(0)
-        producer.flush(1)
 
         batch_count += 1
         total_sent += batch_size
@@ -200,7 +205,6 @@ def main() -> None:
     if remaining > 0:
         logger.warning("%d messages were NOT flushed before timeout.", remaining)
     logger.info("Producer shut down cleanly.")
-    sys.exit(0)
 
 
 if __name__ == "__main__":

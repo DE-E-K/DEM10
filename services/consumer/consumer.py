@@ -36,6 +36,7 @@ import logging
 import signal
 import sys
 import threading
+from collections import defaultdict
 
 from confluent_kafka import KafkaError
 from prometheus_client import Counter, start_http_server
@@ -71,15 +72,18 @@ DLQ_TOTAL = Counter(
     "Total messages routed to the DLQ topic (unexpected processing errors).",
 )
 
-# Shutdown flag
-_shutdown_requested: bool = False
+# Shutdown event (thread-safe; replaces plain bool flag)
+_shutdown_event = threading.Event()
+
+# Maximum times a single message is retried before being committed and skipped.
+# Prevents infinite reprocessing of poison-pill messages that always fail.
+_MAX_DLQ_RETRIES = 3
 
 
 def _handle_signal(signum: int, _frame) -> None:
     """Request graceful shutdown on SIGINT / SIGTERM."""
-    global _shutdown_requested
     logger.info("Shutdown signal %d received — stopping consumer loop…", signum)
-    _shutdown_requested = True
+    _shutdown_event.set()
 
 
 def _publish_quarantine(producer, topic: str, raw: str, error: str,error_type: str,) -> None:
@@ -101,7 +105,9 @@ def _publish_quarantine(producer, topic: str, raw: str, error: str,error_type: s
     producer.produce(topic,
         value=json.dumps(envelope.model_dump()).encode("utf-8"),
     )
-    producer.flush(1)
+    # poll(0) services the delivery callback without blocking.
+    # Full flush is reserved for shutdown to avoid per-message blocking.
+    producer.poll(0)
 
 
 def main() -> None:
@@ -149,8 +155,12 @@ def main() -> None:
         },
     )
 
+    # Per-(topic, partition, offset) retry counter for DLQ-bound messages.
+    # Prevents infinite reprocessing of poison-pill messages.
+    _retry_counts: dict[tuple, int] = defaultdict(int)
+
     try:
-        while not _shutdown_requested:
+        while not _shutdown_event.is_set():
             # poll(1.0) blocks for up to 1 second waiting for a new message.
             # Returns None on timeout — we simply loop again.
             msg = consumer.poll(1.0)
@@ -184,20 +194,20 @@ def main() -> None:
                     )
 
                 # Step 3: Write to PostgreSQL (inside a pool connection)
-                # The connection is borrowed from the pool and returned (via
-                # context manager) when the ``with`` block exits.
+                # Both the event insert and checkpoint upsert are wrapped in
+                # an explicit transaction so they commit atomically.
                 with pool.connection() as conn:
-                    insert_heartbeat(
-                        conn, event, msg.topic(), msg.partition(), msg.offset()
-                    )
-                    upsert_checkpoint(
-                        conn,
-                        settings.kafka_consumer_group_db,
-                        msg.topic(),
-                        msg.partition(), 
-                        msg.offset(),
-                    )
-                    # conn.commit() is called automatically by the context manager
+                    with conn.transaction():
+                        insert_heartbeat(
+                            conn, event, msg.topic(), msg.partition(), msg.offset()
+                        )
+                        upsert_checkpoint(
+                            conn,
+                            settings.kafka_consumer_group_db,
+                            msg.topic(),
+                            msg.partition(), 
+                            msg.offset(),
+                        )
 
                 DB_INSERTS.inc()
 
@@ -228,8 +238,14 @@ def main() -> None:
             except Exception as exc:
                 # Unexpected error (DB down, bug in code, etc.) — route to DLQ
                 # so the message is preserved for manual inspection / replay.
+                msg_key = (msg.topic(), msg.partition(), msg.offset())
+                _retry_counts[msg_key] += 1
+                attempt = _retry_counts[msg_key]
+
                 logger.exception(
-                    "Unexpected processing failure, routing to DLQ",
+                    "Unexpected processing failure (attempt %d/%d), routing to DLQ",
+                    attempt,
+                    _MAX_DLQ_RETRIES,
                     extra={"error": str(exc), "topic": settings.kafka_topic_dlq},
                 )
                 DLQ_TOTAL.inc()
@@ -240,16 +256,26 @@ def main() -> None:
                     str(exc),
                     "PROCESSING",
                 )
-                # We DO NOT commit the Kafka offset for unexpected failures —
-                # the message stays available for the retry path / DLQ consumer.
+
+                if attempt >= _MAX_DLQ_RETRIES:
+                    # Poison-pill: commit the offset to advance past it and
+                    # prevent infinite reprocessing.  The message is already
+                    # in the DLQ for manual inspection.
+                    logger.error(
+                        "Message exceeded max DLQ retries (%d) — committing offset to skip",
+                        _MAX_DLQ_RETRIES,
+                    )
+                    consumer.commit(message=msg)
+                    del _retry_counts[msg_key]
+                # else: do NOT commit — Kafka will re-deliver on next poll
 
     finally:
         # Graceful shutdown
         logger.info("Closing Kafka consumer and database pool…")
+        quarantine_producer.flush(timeout=5)
         consumer.close()
         pool.close()
         logger.info("Consumer shut down cleanly.")
-        sys.exit(0)
 
 
 if __name__ == "__main__":
