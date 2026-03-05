@@ -61,6 +61,10 @@ class Settings(BaseSettings):
         default="events.dlq.v1",
         description="Dead-letter queue for messages that caused unexpected processing errors.",
     )
+    kafka_topic_validated: str = Field(
+        default="events.validated.v1",
+        description="Topic for validated events (produced by Flink validation job, consumed by anomaly job).",
+    )
     kafka_consumer_group_db: str = Field(
         default="cg.db-writer.v1",
         description="Consumer group used by the DB-writer consumer.",

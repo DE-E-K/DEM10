@@ -3,6 +3,7 @@ if (-not $bootstrap) { $bootstrap = "localhost:19092" }
 
 $topics = @(
   @{ name = "events.raw.v1"; partitions = 24 },
+  @{ name = "events.validated.v1"; partitions = 24 },
   @{ name = "events.invalid.v1"; partitions = 6 },
   @{ name = "events.anomaly.v1"; partitions = 6 },
   @{ name = "events.dlq.v1"; partitions = 6 }

@@ -14,12 +14,10 @@ scrape_configs:
       - targets: ["producer:8000"]
     metrics_path: /metrics
 
-  - job_name: heartbeat_consumer
+  # Apache Flink cluster metrics (replaces consumer + anomaly-detector)
+  - job_name: flink
     static_configs:
-      - targets: ["consumer:8001"]
-    metrics_path: /metrics
-
-  - job_name: heartbeat_anomaly_detector
-    static_configs:
-      - targets: ["anomaly-detector:8002"]
-    metrics_path: /metrics
+      - targets:
+          - "flink-jobmanager:9249"
+          - "flink-taskmanager:9249"
+    metrics_path: /

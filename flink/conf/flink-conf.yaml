@@ -1,0 +1,38 @@
+# Flink cluster configuration
+# =============================================================================
+# This file is mounted at /opt/flink/conf/flink-conf.yaml inside the
+# JobManager and TaskManager containers.  Settings can also be overridden
+# via the FLINK_PROPERTIES environment variable in docker-compose.
+# =============================================================================
+
+# Cluster
+jobmanager.rpc.address: flink-jobmanager
+jobmanager.rpc.port: 6123
+jobmanager.memory.process.size: 1024m
+taskmanager.memory.process.size: 1536m
+taskmanager.numberOfTaskSlots: 4
+
+# Checkpointing (exactly-once)
+execution.checkpointing.interval: 30s
+execution.checkpointing.mode: EXACTLY_ONCE
+execution.checkpointing.timeout: 60s
+execution.checkpointing.min-pause: 10s
+execution.checkpointing.max-concurrent-checkpoints: 1
+
+# State backend
+state.backend: rocksdb
+state.checkpoints.dir: file:///opt/flink/checkpoints
+state.savepoints.dir: file:///opt/flink/savepoints
+
+# Restart strategy
+restart-strategy: fixed-delay
+restart-strategy.fixed-delay.attempts: 3
+restart-strategy.fixed-delay.delay: 10s
+
+# Prometheus metrics reporter
+metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+metrics.reporter.prom.port: 9249
+
+# Python / PyFlink
+python.client.executable: python3
+python.executable: python3
