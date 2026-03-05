@@ -39,13 +39,11 @@ from prometheus_client import Counter, start_http_server
 
 from services.common.config import settings
 from services.common.kafka_utils import build_producer, make_delivery_callback
+from services.common.logging_config import setup_logging
 from services.common.simulator import heartbeat_stream
 
-# Logging setup
-logging.basicConfig(
-    level=settings.log_level,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+# Structured JSON logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # Prometheus metrics

@@ -45,13 +45,11 @@ from pydantic import ValidationError
 from services.common.config import settings
 from services.common.db import get_pool, insert_heartbeat, upsert_checkpoint
 from services.common.kafka_utils import build_consumer, build_producer
+from services.common.logging_config import setup_logging
 from services.common.models import HeartbeatEvent, InvalidEvent
 
-# Logging
-logging.basicConfig(
-    level=settings.log_level,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+# Structured JSON logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # Prometheus metrics─

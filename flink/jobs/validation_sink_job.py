@@ -49,15 +49,13 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from services.common.config import settings
+from services.common.logging_config import setup_logging
 from services.common.models import HeartbeatEvent, InvalidEvent
 
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=settings.log_level,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+setup_logging()
 logger = logging.getLogger("flink.validation_sink_job")
 
 # ---------------------------------------------------------------------------
