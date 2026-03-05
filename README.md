@@ -9,15 +9,20 @@ detects physiological anomalies, and visualises everything in Grafana.
 ```mermaid
 flowchart LR
   G[Generator] --> P[Kafka Producer]
-  P --> K[(Kafka Topic events.raw.v1)]
-  K --> C[Consumer + DB Writer]
-  K --> A[Anomaly Detector]
-  C --> D[(PostgreSQL heartbeat_events)]
-  A --> AD[(PostgreSQL anomalies)]
-  A --> KA[(Kafka Topic events.anomaly.v1)]
-  D --> GR[Grafana]
-  AD --> GR
-  K --> UI[Kafka UI]
+  P --> RAW[(events.raw.v1)]
+  RAW --> FV[Flink: Validation + Sink Job]
+  FV --> DB_HB[(PostgreSQL heartbeat_events)]
+  FV --> VAL[(events.validated.v1)]
+  FV --> INV[(events.invalid.v1)]
+  FV --> DLQ[(events.dlq.v1)]
+  VAL --> FA[Flink: Anomaly Detection Job]
+  FA --> DB_AN[(PostgreSQL anomalies)]
+  FA --> ANOM[(events.anomaly.v1)]
+  DB_HB --> GR[Grafana]
+  DB_AN --> GR
+  FV -.-> PROM[Prometheus]
+  FA -.-> PROM
+  PROM --> GR
 ```
 
 ## Stack
@@ -26,12 +31,12 @@ flowchart LR
 |---|---|
 | Simulation | Python (Gaussian-baseline simulator) |
 | Streaming | Apache Kafka + Zookeeper (Confluent 7.6.1) |
-| Processing | Python (confluent-kafka, pydantic) |
+| Processing | **Apache Flink 1.19** (PyFlink — replaces Python consumers) |
 | Storage | PostgreSQL 16 |
 | Config | pydantic-settings (env-var validated) |
-| Metrics | prometheus-client (per-service /metrics endpoints) |
+| Metrics | Prometheus (Flink metrics reporter + producer /metrics) |
 | Dashboards | Grafana 11.4.0 |
-| Observability | Kafka UI |
+| Observability | Kafka UI, Flink Web UI |
 | Testing | pytest |
 | Infra | Docker Compose |
 
@@ -42,6 +47,13 @@ DEM10/
 ├── docker-compose.yml              ← Root-level compose file (use this)
 ├── .env.example                    ← Copy to .env before running
 ├── requirements.txt
+├── flink/
+│   ├── Dockerfile                  ← Custom Flink image (PyFlink + JDBC/Kafka JARs)
+│   ├── conf/flink-conf.yaml        ← Flink cluster configuration
+│   ├── README.md                   ← Job submission & monitoring docs
+│   └── jobs/
+│       ├── validation_sink_job.py  ← Flink: validate → JDBC sink + validated topic
+│       └── anomaly_job.py          ← Flink: per-customer anomaly detection (keyed state)
 ├── services/
 │   ├── common/
 │   │   ├── config.py               ← Validated settings (pydantic-settings)
@@ -50,23 +62,23 @@ DEM10/
 │   │   ├── kafka_utils.py          ← Hardened producer/consumer factories
 │   │   └── db.py                   ← Connection pool + retry logic
 │   ├── producer/producer.py        ← Kafka producer (Prometheus + graceful shutdown)
-│   ├── consumer/consumer.py        ← DB-writer consumer (Prometheus + graceful shutdown)
+│   ├── consumer/consumer.py        ← [Legacy] Original Python DB writer (replaced by Flink)
 │   └── anomaly_detector/
 │       ├── anomaly_rules.py        ← Pure, testable rule engine
-│       └── detector.py             ← Anomaly consumer (Prometheus + graceful shutdown)
+│       └── detector.py             ← [Legacy] Original Python detector (replaced by Flink)
 ├── db/schema/01_schema.sql         ← Fully-commented PostgreSQL schema
 ├── tests/
 │   ├── unit/
 │   │   ├── test_generator.py       ← Simulator unit tests
 │   │   ├── test_validation.py      ← Model validation tests
-│   │   └── test_anomaly_rules.py   ← Anomaly rule engine tests (new)
+│   │   └── test_anomaly_rules.py   ← Anomaly rule engine tests
 │   ├── integration/
 │   │   └── test_db_connection.py   ← DB connectivity + schema tests
 │   └── load/
 │       └── load_smoke.py           ← Throughput smoke test
 ├── monitoring/
-│   ├── grafana/dashboards/         ← 7-panel dashboard (auto-provisioned)
-│   └── prometheus/prometheus.yml   ← Scrape config
+│   ├── grafana/dashboards/         ← 14-panel dashboard (PostgreSQL + Flink metrics)
+│   └── prometheus/prometheus.yml   ← Scrape config (Producer + Flink)
 ├── scripts/create-topics.ps1       ← PowerShell topic creation helper
 └── docs/architecture/              ← Architecture docs + Mermaid diagrams
 ```
@@ -116,18 +128,29 @@ docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --cr
 docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.dlq.v1      --partitions 6  --replication-factor 1
 ```
 
-### 4 – Run the pipeline (3 terminals)
+### 4 – Run the pipeline
+
+The producer runs as a Docker service. The Flink jobs are submitted to the
+Flink cluster running in Docker:
 
 ```powershell
-# Terminal 1 – Producer (publishes synthetic heartbeat events)
-python -m services.producer.producer
+# Start all services (producer + Flink cluster + infra)
+docker compose up -d
 
-# Terminal 2 – Consumer DB Writer (validates + persists to PostgreSQL)
-python -m services.consumer.consumer
+# Submit the validation + DB-sink Flink job
+docker exec heartbeat-flink-jobmanager flink run -py /opt/flink/jobs/validation_sink_job.py
 
-# Terminal 3 – Anomaly Detector (detects and alerts on anomalies)
-python -m services.anomaly_detector.detector
+# Submit the anomaly detection Flink job
+docker exec heartbeat-flink-jobmanager flink run -py /opt/flink/jobs/anomaly_job.py
 ```
+
+> **Legacy mode** (without Flink): You can still run the original Python
+> services locally for debugging:
+> ```powershell
+> python -m services.producer.producer
+> python -m services.consumer.consumer
+> python -m services.anomaly_detector.detector
+> ```
 
 ### 5 – Verify data flowing
 
@@ -148,6 +171,7 @@ psql -h localhost -p 55432 -U $env:POSTGRES_USER -d $env:POSTGRES_DB -c "SELECT 
 | `KAFKA_TOPIC_INVALID` | `events.invalid.v1` | Validation-failure quarantine topic |
 | `KAFKA_TOPIC_ANOMALY` | `events.anomaly.v1` | Anomaly events topic |
 | `KAFKA_TOPIC_DLQ` | `events.dlq.v1` | Dead-letter queue topic |
+| `KAFKA_TOPIC_VALIDATED` | `events.validated.v1` | Validated events (Flink validation → anomaly) |
 | `KAFKA_CONSUMER_GROUP_DB` | `cg.db-writer.v1` | Consumer group for DB writer |
 | `KAFKA_CONSUMER_GROUP_ANOMALY` | `cg.anomaly.v1` | Consumer group for anomaly detector |
 | `POSTGRES_HOST` | `localhost` | PostgreSQL host |
@@ -174,12 +198,12 @@ psql -h localhost -p 55432 -U $env:POSTGRES_USER -d $env:POSTGRES_DB -c "SELECT 
 
 | Service | URL | Credentials |
 |---|---|---|
-| Grafana | http://localhost:3000 | admin / admin (default)|
+| Grafana | http://localhost:3000 | Set via GF_ADMIN_USER / GF_ADMIN_PASSWORD in .env |
 | Prometheus | http://localhost:9090 | – |
 | Kafka UI | http://localhost:8080 | – |
+| Flink Web UI | http://localhost:8081 | – |
+| Flink Metrics | http://localhost:9249 | – (Prometheus auto-scrapes) |
 | Producer /metrics | http://localhost:8000/metrics | – |
-| Consumer /metrics | http://localhost:8001/metrics | – |
-| Detector /metrics | http://localhost:8002/metrics | – |
 
 ## Tests
 
@@ -196,15 +220,16 @@ python tests/load/load_smoke.py
 
 ## Key Prometheus Metrics
 
-| Metric | Service | Description |
+| Metric | Source | Description |
 |---|---|---|
 | `heartbeat_messages_produced_total` | Producer | Messages published to Kafka |
 | `heartbeat_produce_errors_total` | Producer | Delivery failures |
-| `heartbeat_messages_consumed_total` | Consumer | Messages polled from Kafka |
-| `heartbeat_db_inserts_total` | Consumer | Rows written to PostgreSQL |
-| `heartbeat_invalid_total` | Consumer | Messages routed to invalid topic |
-| `heartbeat_dlq_total` | Consumer | Messages routed to DLQ |
-| `heartbeat_anomalies_total{type,severity}` | Detector | Anomalies detected (labelled) |
+| `flink_taskmanager_job_task_numRecordsIn` | Flink | Records entering each operator |
+| `flink_taskmanager_job_task_numRecordsOut` | Flink | Records leaving each operator |
+| `flink_jobmanager_job_lastCheckpointDuration` | Flink | Last checkpoint duration (ms) |
+| `flink_jobmanager_job_numberOfCompletedCheckpoints` | Flink | Successful checkpoints |
+| `flink_jobmanager_job_numberOfFailedCheckpoints` | Flink | Failed checkpoints |
+| `flink_jobmanager_job_uptime` | Flink | Job uptime (ms) |
 
 ## Grafana Dashboard Panels
 Dashboard preview:
@@ -216,8 +241,14 @@ Dashboard preview:
 3. **Anomaly Breakdown by Type** – bar chart (LOW / HIGH / SPIKE)
 4. **Average Heart Rate (5 min)** – population mean stat
 5. **p95 Heart Rate (5 min)** – 95th percentile stat
-6. **Active Customers (5 min)** – distinct customer count stat
+6. **Active Customers (10 min)** – distinct customer count stat
 7. **Recent Anomalies** – live table of last 20 flagged events
+8. **Flink Records In/Out per Second** – operator throughput timeseries
+9. **Flink Checkpoint Duration** – checkpoint health timeseries
+10. **Flink Job Uptime** – uptime stat
+11. **Completed Checkpoints** – success count stat
+12. **Failed Checkpoints** – failure count stat (threshold alert: red if > 0)
+13. **TaskManagers Registered** – cluster capacity gauge
 
 ## Anomaly Detection Rules
 

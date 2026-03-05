@@ -15,7 +15,8 @@
     "heartbeat",
     "realtime",
     "kafka",
-    "postgres"
+    "postgres",
+    "flink"
   ],
   "panels": [
     {
@@ -286,6 +287,225 @@
         "w": 8,
         "x": 16,
         "y": 8
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Flink Cluster Health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Flink Records In / Out per Second",
+      "description": "Records flowing through Flink operators. A sustained gap between in and out indicates processing bottleneck or data loss.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(flink_taskmanager_job_task_numRecordsIn[1m])",
+          "legendFormat": "Records In ({{task_name}})"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(flink_taskmanager_job_task_numRecordsOut[1m])",
+          "legendFormat": "Records Out ({{task_name}})"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Flink Checkpoint Duration",
+      "description": "Time taken to complete each Flink checkpoint. Spikes indicate state-backend or I/O pressure.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "flink_jobmanager_job_lastCheckpointDuration / 1000",
+          "legendFormat": "Checkpoint Duration (s)"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "fixedColor": "purple",
+            "mode": "fixed"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 30 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Flink Uptime",
+      "description": "Time since the Flink JobManager started. Restarts reset this counter.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "flink_jobmanager_job_uptime / 1000",
+          "legendFormat": "Uptime"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 25
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "displayName": "Job Uptime"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Completed Checkpoints",
+      "description": "Total number of successfully completed Flink checkpoints since job start.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "flink_jobmanager_job_numberOfCompletedCheckpoints",
+          "legendFormat": "Completed"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 25
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "Checkpoints OK"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Failed Checkpoints",
+      "description": "Number of failed checkpoints. Non-zero values indicate state-backend or configuration issues.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "flink_jobmanager_job_numberOfFailedCheckpoints",
+          "legendFormat": "Failed"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 25
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "Checkpoints Failed",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "gauge",
+      "title": "Flink Task Slots Used",
+      "description": "Number of task slots currently in use vs. total available. Saturation means no capacity for additional parallelism.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "flink_jobmanager_numRegisteredTaskManagers",
+          "legendFormat": "TaskManagers"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 25
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "TaskManagers"
+        }
       }
     }
   ]
