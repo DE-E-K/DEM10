@@ -10,14 +10,17 @@ import pytest
 from services.anomaly_detector.anomaly_rules import AnomalyRules
 from services.common.models import HeartbeatEvent
 
+from datetime import datetime, timezone
 
 # Pre-build a rules instance; it's stateless so one instance covers all tests.
 rules = AnomalyRules()
 
+_NOW = datetime.now(timezone.utc)
+
 
 def _make_event(heart_rate: int) -> HeartbeatEvent:
     """Helper: create a minimal HeartbeatEvent with the given heart rate."""
-    return HeartbeatEvent(customer_id="cust_00001", heart_rate=heart_rate)
+    return HeartbeatEvent(customer_id="cust_00001", heart_rate=heart_rate, timestamp=_NOW)
 
 
 # ── Rule 1: LOW_HEART_RATE ─────────────────────────────────────────────────────

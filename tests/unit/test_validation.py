@@ -16,6 +16,10 @@ from pydantic import ValidationError
 
 from services.common.models import AnomalyEvent, HeartbeatEvent, InvalidEvent
 
+from datetime import datetime, timezone
+
+_NOW = datetime.now(timezone.utc)
+
 
 # ── HeartbeatEvent ─────────────────────────────────────────────────────────────
 
@@ -24,44 +28,48 @@ class TestHeartbeatEventValidation:
     def test_empty_customer_id_rejected(self):
         """Empty string customer_id must raise ValidationError."""
         with pytest.raises(ValidationError, match="customer_id cannot be empty"):
-            HeartbeatEvent(customer_id="", heart_rate=70)
+            HeartbeatEvent(customer_id="", heart_rate=70, timestamp=_NOW)
 
     def test_whitespace_only_customer_id_rejected(self):
         """Whitespace-only customer_id must be rejected (same validator)."""
         with pytest.raises(ValidationError, match="customer_id cannot be empty"):
-            HeartbeatEvent(customer_id="   ", heart_rate=70)
+            HeartbeatEvent(customer_id="   ", heart_rate=70, timestamp=_NOW)
 
     def test_heart_rate_above_250_rejected(self):
         """Heart rate > 250 violates hard physiological bounds."""
         with pytest.raises(ValidationError):
-            HeartbeatEvent(customer_id="cust_001", heart_rate=300)
+            HeartbeatEvent(customer_id="cust_001", heart_rate=300, timestamp=_NOW)
 
     def test_heart_rate_below_zero_rejected(self):
         """Negative heart rate is physically impossible and must be rejected."""
         with pytest.raises(ValidationError):
-            HeartbeatEvent(customer_id="cust_001", heart_rate=-5)
+            HeartbeatEvent(customer_id="cust_001", heart_rate=-5, timestamp=_NOW)
 
     def test_exactly_250_accepted(self):
         """250 bpm is the hard upper bound and must be accepted."""
-        event = HeartbeatEvent(customer_id="cust_001", heart_rate=250)
+        event = HeartbeatEvent(customer_id="cust_001", heart_rate=250, timestamp=_NOW)
         assert event.heart_rate == 250
 
     def test_zero_heart_rate_accepted(self):
         """0 bpm is the hard lower bound (unusual but not an error at this layer)."""
-        event = HeartbeatEvent(customer_id="cust_001", heart_rate=0)
+        event = HeartbeatEvent(customer_id="cust_001", heart_rate=0, timestamp=_NOW)
         assert event.heart_rate == 0
 
-    def test_defaults_are_populated_automatically(self):
-        """event_id and timestamp should be auto-populated when omitted."""
-        event = HeartbeatEvent(customer_id="cust_001", heart_rate=72)
+    def test_timestamp_is_required(self):
+        """timestamp is a required field (no default) — must raise if omitted."""
+        with pytest.raises(ValidationError, match="timestamp"):
+            HeartbeatEvent(customer_id="cust_001", heart_rate=72)
+
+    def test_event_id_default_populated(self):
+        """event_id should be auto-populated (UUID v4) when omitted."""
+        event = HeartbeatEvent(customer_id="cust_001", heart_rate=72, timestamp=_NOW)
         assert event.event_id is not None
-        assert event.timestamp is not None
 
     def test_model_is_frozen(self):
         """HeartbeatEvent must be immutable after creation (frozen model)."""
-        event = HeartbeatEvent(customer_id="cust_001", heart_rate=72)
-        with pytest.raises(Exception):  # ValidationError or TypeError from frozen=True
-            object.__setattr__(event, "heart_rate", 99)
+        event = HeartbeatEvent(customer_id="cust_001", heart_rate=72, timestamp=_NOW)
+        with pytest.raises(Exception):  # ValidationError from frozen=True
+            event.heart_rate = 99
 
 
 # ── AnomalyEvent ───────────────────────────────────────────────────────────────
@@ -69,8 +77,7 @@ class TestHeartbeatEventValidation:
 class TestAnomalyEventValidation:
 
     def test_valid_anomaly_event_constructed(self):
-        from services.common.models import HeartbeatEvent
-        base = HeartbeatEvent(customer_id="cust_001", heart_rate=45)
+        base = HeartbeatEvent(customer_id="cust_001", heart_rate=45, timestamp=_NOW)
         anomaly = AnomalyEvent(
             event_id=base.event_id,
             customer_id=base.customer_id,
