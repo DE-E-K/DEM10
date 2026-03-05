@@ -10,11 +10,12 @@ datasources:
   - name: PostgreSQL
     type: postgres
     access: proxy
+    uid: PCC52D03280B7034C
     url: postgres:5432
-    user: heartbeat
+    user: $POSTGRES_USER
     secureJsonData:
-      password: heartbeat
+      password: $POSTGRES_PASSWORD
     jsonData:
-      database: heartbeat
+      database: $POSTGRES_DB
       sslmode: disable
       postgresVersion: 1600

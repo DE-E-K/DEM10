@@ -31,8 +31,8 @@ def _get_conn() -> psycopg.Connection:
         host=os.getenv("POSTGRES_HOST", "localhost"),
         port=os.getenv("POSTGRES_PORT", "55432"),
         dbname=os.getenv("POSTGRES_DB", "heartbeat"),
-        user=os.getenv("POSTGRES_USER", "heartbeat_user"),
-        password=os.getenv("POSTGRES_PASSWORD", "heartbeat_pass"),
+        user=os.getenv("POSTGRES_USER"),
+        password=os.getenv("POSTGRES_PASSWORD"),
         connect_timeout=3,
     )
 
@@ -48,9 +48,8 @@ def db_conn():
     conn.close()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Tests
-# ─────────────────────────────────────────────────────────────────────────────
+# ===========================================================================
 
 def test_basic_connectivity(db_conn):
     """Smoke test: the connection is live and responds to a trivial query."""

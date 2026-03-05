@@ -71,11 +71,17 @@ class Settings(BaseSettings):
     )
 
     # PostgreSQL
+    # SECURITY: No default passwords — credentials MUST be provided via .env
+    # or environment variables.  See .env.example for the required keys.
     postgres_host: str = Field(default="localhost")
     postgres_port: int = Field(default=55432, ge=1, le=65535)
     postgres_db: str = Field(default="heartbeat")
-    postgres_user: str = Field(default="heartbeat_user")
-    postgres_password: str = Field(default="heartbeat_pass")
+    postgres_user: str = Field(
+        description="PostgreSQL user. Must be set via POSTGRES_USER env var or .env file.",
+    )
+    postgres_password: str = Field(
+        description="PostgreSQL password. Must be set via POSTGRES_PASSWORD env var or .env file.",
+    )
 
     # Connection pool
     db_pool_min: int = Field(

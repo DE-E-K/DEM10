@@ -4,9 +4,16 @@ __pycache__/
 *.pyd
 .venv/
 .env
+.env.local
+.env.production
+.env.*.local
+docker-compose.override.yml
 .pytest_cache/
 .coverage
 htmlcov/
 .vscode/
 .idea/
 *.log
+*.pem
+*.key
+*.crt
