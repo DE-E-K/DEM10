@@ -12,7 +12,7 @@ Design decisions
 """
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -47,7 +47,6 @@ class HeartbeatEvent(BaseModel):
         description="Customer identifier. Format: 'cust_NNNNN'.",
     )
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
         description="UTC timestamp of the heart-rate reading.",
     )
     heart_rate: int = Field(
@@ -103,8 +102,12 @@ class AnomalyEvent(BaseModel):
     customer_id: str = Field(description="Customer identifier.")
     timestamp: datetime = Field(description="UTC timestamp of the original reading.")
     heart_rate: int = Field(description="Heart rate (bpm) that triggered the anomaly.")
-    anomaly_type: str = Field(description="Anomaly classification label.")
-    severity: str = Field(description="Severity tier: 'high' or 'medium'.")
+    anomaly_type: Literal["LOW_HEART_RATE", "HIGH_HEART_RATE", "SPIKE"] = Field(
+        description="Anomaly classification label.",
+    )
+    severity: Literal["high", "medium"] = Field(
+        description="Severity tier: 'high' or 'medium'.",
+    )
     details: dict[str, Any] = Field(
         default_factory=dict,
         description="Contextual metadata about why this anomaly was raised.",
@@ -132,7 +135,7 @@ class InvalidEvent(BaseModel):
 
     error: str = Field(description="Error message explaining the rejection reason.")
     raw: str = Field(description="Original raw Kafka message value (UTF-8 string).")
-    error_type: str = Field(
+    error_type: Literal["VALIDATION", "PROCESSING"] = Field(
         default="VALIDATION",
         description="'VALIDATION' for schema/domain errors, 'PROCESSING' for unexpected failures.",
     )

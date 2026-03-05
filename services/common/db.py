@@ -27,12 +27,13 @@ Usage
 
 import json
 import logging
+import random
 import time
 from functools import wraps
 from typing import Callable, TypeVar
 
 import psycopg
-from psycopg.errors import OperationalError
+from psycopg.errors import InterfaceError, OperationalError
 from psycopg_pool import ConnectionPool
 
 from services.common.config import settings
@@ -139,20 +140,22 @@ def _with_retry(fn: _F) -> _F:
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
                 return fn(*args, **kwargs)
-            except OperationalError as exc:
+            except (OperationalError, InterfaceError) as exc:
                 if attempt == _MAX_RETRIES:
                     logger.error(
                         "DB operation failed after %d retries: %s", _MAX_RETRIES, exc
                     )
                     raise
+                # Jittered exponential backoff to prevent thundering herd
+                jittered_delay = delay * (0.5 + random.random())
                 logger.warning(
                     "Transient DB error (attempt %d/%d), retrying in %.1fs: %s",
                     attempt,
                     _MAX_RETRIES,
-                    delay,
+                    jittered_delay,
                     exc,
                 )
-                time.sleep(delay)
+                time.sleep(jittered_delay)
                 delay *= 2  # Exponential back-off
 
     return _wrapper  # type: ignore[return-value]
@@ -252,7 +255,8 @@ def insert_anomaly(conn: psycopg.Connection, anomaly: AnomalyEvent) -> None:
             INSERT INTO anomalies (
                 event_id, customer_id, event_time, heart_rate,
                 anomaly_type, severity, details
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb);
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
+            ON CONFLICT (event_id, anomaly_type) DO NOTHING;
             """,
             (
                 str(anomaly.event_id),

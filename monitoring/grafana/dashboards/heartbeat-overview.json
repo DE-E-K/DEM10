@@ -231,8 +231,8 @@
     {
       "id": 6,
       "type": "stat",
-      "title": "Active Customers (Last 5 min)",
-      "description": "Number of distinct customers who sent at least one reading in the last 5 minutes. Sudden drops may indicate producer or Kafka issues.",
+      "title": "Active Customers (Last 10 min)",
+      "description": "Number of distinct customers who sent at least one reading in the last 10 minutes. Sudden drops may indicate producer or Kafka issues.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "PCC52D03280B7034C"

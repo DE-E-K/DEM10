@@ -120,7 +120,11 @@ CREATE TABLE IF NOT EXISTS anomalies (
     details      JSONB        NOT NULL,
 
     -- Row creation timestamp (different from event_time for observability).
-    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+
+    -- Idempotency guard: the same (event, anomaly_type) pair can only exist once.
+    -- Prevents duplicate anomaly rows when the detector reprocesses messages.
+    UNIQUE (event_id, anomaly_type)
 );
 
 -- Global time index: powers "anomalies in the last hour" dashboard queries.
