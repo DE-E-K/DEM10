@@ -46,7 +46,7 @@ from pyflink.datastream.state import ListStateDescriptor
 # ---------------------------------------------------------------------------
 # Ensure the project root is importable so we can use services.common.*
 # ---------------------------------------------------------------------------
-_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "app"))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
@@ -239,7 +239,7 @@ def _build_jdbc_anomaly_sink_ddl() -> str:
     pg_db = os.getenv("POSTGRES_DB", settings.postgres_db)
     pg_user = os.getenv("POSTGRES_USER", settings.postgres_user)
     pg_password = os.getenv("POSTGRES_PASSWORD", settings.postgres_password)
-    jdbc_url = f"jdbc:postgresql://{pg_host}:{pg_port}/{pg_db}"
+    jdbc_url = f"jdbc:postgresql://{pg_host}:{pg_port}/{pg_db}?stringtype=unspecified"
 
     return f"""
         CREATE TABLE anomaly_jdbc_sink (
@@ -306,7 +306,7 @@ def main():
     anomaly_stream.sink_to(_build_kafka_sink(settings.kafka_topic_anomaly))
 
     # ── Anomaly output → PostgreSQL anomalies table (JDBC sink) ────────
-    from pyflink.datastream import StreamTableEnvironment
+    from pyflink.table import StreamTableEnvironment
     from pyflink.common import Row
 
     t_env = StreamTableEnvironment.create(env)

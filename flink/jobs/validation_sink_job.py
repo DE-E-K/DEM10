@@ -32,19 +32,19 @@ import sys
 
 from pyflink.common import SimpleStringSchema, WatermarkStrategy
 from pyflink.common.typeinfo import Types
-from pyflink.datastream import StreamExecutionEnvironment, OutputTag
+from pyflink.datastream import StreamExecutionEnvironment
 from pyflink.datastream.connectors.kafka import (
     KafkaOffsetsInitializer,
     KafkaRecordSerializationSchema,
     KafkaSink,
     KafkaSource,
 )
-from pyflink.datastream.functions import ProcessFunction
+from pyflink.datastream.functions import ProcessFunction, MapFunction, FilterFunction
 
 # ---------------------------------------------------------------------------
 # Ensure the project root is importable so we can use services.common.*
 # ---------------------------------------------------------------------------
-_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "app"))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
@@ -59,21 +59,21 @@ setup_logging()
 logger = logging.getLogger("flink.validation_sink_job")
 
 # ---------------------------------------------------------------------------
-# Side-output tags for routing invalid / DLQ messages
+# Routing prefixes for multiplexed output stream
 # ---------------------------------------------------------------------------
-INVALID_TAG = OutputTag("invalid", Types.STRING())
-DLQ_TAG = OutputTag("dlq", Types.STRING())
+_VALID_PREFIX = "VALID:"
+_INVALID_PREFIX = "INVALID:"
+_DLQ_PREFIX = "DLQ:"
 
 
 class ValidateAndRouteFunction(ProcessFunction):
     """
     Flink ProcessFunction that validates each raw heartbeat JSON message.
 
-    Output routing
-    --------------
-    * Main output (str)  → valid event JSON, forwarded to JDBC sink + validated topic.
-    * INVALID_TAG (str)  → InvalidEvent JSON envelope (schema/domain failure).
-    * DLQ_TAG (str)      → InvalidEvent JSON envelope (unexpected processing error).
+    All output is emitted on the main output with a routing prefix:
+    * ``VALID:``   → valid event JSON, forwarded to JDBC sink + validated topic.
+    * ``INVALID:`` → InvalidEvent JSON envelope (schema/domain failure).
+    * ``DLQ:``     → InvalidEvent JSON envelope (unexpected processing error).
     """
 
     def __init__(self, hr_min: int, hr_max: int):
@@ -94,22 +94,41 @@ class ValidateAndRouteFunction(ProcessFunction):
                 )
 
             # Emit the validated event JSON on the main output
-            yield json.dumps(payload)
+            yield _VALID_PREFIX + json.dumps(payload)
 
         except (json.JSONDecodeError, Exception) as exc:
-            # Determine whether this is a validation error or unexpected
             from pydantic import ValidationError
 
             if isinstance(exc, (ValidationError, ValueError, json.JSONDecodeError)):
                 envelope = InvalidEvent(
                     error=str(exc), raw=value[:2000], error_type="VALIDATION"
                 )
-                ctx.output(INVALID_TAG, json.dumps(envelope.model_dump()))
+                yield _INVALID_PREFIX + json.dumps(envelope.model_dump())
             else:
                 envelope = InvalidEvent(
                     error=str(exc), raw=value[:2000], error_type="PROCESSING"
                 )
-                ctx.output(DLQ_TAG, json.dumps(envelope.model_dump()))
+                yield _DLQ_PREFIX + json.dumps(envelope.model_dump())
+
+
+class _PrefixFilter(FilterFunction):
+    """Filter elements by routing prefix."""
+
+    def __init__(self, prefix: str):
+        self._prefix = prefix
+
+    def filter(self, value: str) -> bool:
+        return value.startswith(self._prefix)
+
+
+class _StripPrefix(MapFunction):
+    """Remove the routing prefix from a string."""
+
+    def __init__(self, prefix: str):
+        self._prefix = prefix
+
+    def map(self, value: str) -> str:
+        return value[len(self._prefix):]
 
 
 def _build_kafka_source(env: StreamExecutionEnvironment) -> KafkaSource:
@@ -155,7 +174,7 @@ def _build_jdbc_sink_ddl() -> str:
     pg_db = os.getenv("POSTGRES_DB", settings.postgres_db)
     pg_user = os.getenv("POSTGRES_USER", settings.postgres_user)
     pg_password = os.getenv("POSTGRES_PASSWORD", settings.postgres_password)
-    jdbc_url = f"jdbc:postgresql://{pg_host}:{pg_port}/{pg_db}"
+    jdbc_url = f"jdbc:postgresql://{pg_host}:{pg_port}/{pg_db}?stringtype=unspecified"
 
     return f"""
         CREATE TABLE heartbeat_jdbc_sink (
@@ -198,21 +217,38 @@ def main():
     )
 
     # ── Validate & route ───────────────────────────────────────────────
-    validated = raw_stream.process(
+    # All output from the process function carries a routing prefix
+    routed = raw_stream.process(
         ValidateAndRouteFunction(settings.heart_rate_min, settings.heart_rate_max),
         output_type=Types.STRING(),
     )
 
-    # ── Main output → JDBC sink (PostgreSQL heartbeat_events) ──────────
+    # ── Split by prefix ────────────────────────────────────────────────
+    validated = (
+        routed
+        .filter(_PrefixFilter(_VALID_PREFIX))
+        .map(_StripPrefix(_VALID_PREFIX), output_type=Types.STRING())
+    )
+    invalid_stream = (
+        routed
+        .filter(_PrefixFilter(_INVALID_PREFIX))
+        .map(_StripPrefix(_INVALID_PREFIX), output_type=Types.STRING())
+    )
+    dlq_stream = (
+        routed
+        .filter(_PrefixFilter(_DLQ_PREFIX))
+        .map(_StripPrefix(_DLQ_PREFIX), output_type=Types.STRING())
+    )
+
+    # ── Valid output → JDBC sink (PostgreSQL heartbeat_events) ─────────
     # We use the Table API for JDBC sink (batched upserts).
-    from pyflink.datastream import StreamTableEnvironment
+    from pyflink.table import StreamTableEnvironment
 
     t_env = StreamTableEnvironment.create(env)
     t_env.execute_sql(_build_jdbc_sink_ddl())
 
     # Convert validated JSON strings to Row objects for the JDBC sink
     from pyflink.common import Row
-    from pyflink.datastream.functions import MapFunction
 
     class JsonToRow(MapFunction):
         """Parse validated JSON into a Row matching heartbeat_jdbc_sink schema."""
@@ -266,14 +302,11 @@ def main():
     table = t_env.from_data_stream(row_stream)
     table.execute_insert("heartbeat_jdbc_sink")
 
-    # ── Main output → Kafka validated topic ────────────────────────────
+    # ── Valid output → Kafka validated topic ───────────────────────────
     validated.sink_to(_build_kafka_sink(settings.kafka_topic_validated))
 
-    # ── Side outputs → quarantine Kafka topics ─────────────────────────
-    invalid_stream = validated.get_side_output(INVALID_TAG)
+    # ── Invalid / DLQ → quarantine Kafka topics ───────────────────────
     invalid_stream.sink_to(_build_kafka_sink(settings.kafka_topic_invalid))
-
-    dlq_stream = validated.get_side_output(DLQ_TAG)
     dlq_stream.sink_to(_build_kafka_sink(settings.kafka_topic_dlq))
 
     # ── Execute ────────────────────────────────────────────────────────

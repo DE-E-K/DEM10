@@ -7,7 +7,7 @@
   "version": 2,
   "refresh": "10s",
   "time": {
-    "from": "now-1h",
+    "from": "now-6h",
     "to": "now"
   },
   "timepicker": {},
@@ -101,8 +101,8 @@
     {
       "id": 3,
       "type": "barchart",
-      "title": "Anomaly Breakdown by Type (Last Hour)",
-      "description": "Distribution of anomaly types in the past hour. HIGH_HEART_RATE and LOW_HEART_RATE are severity=high; SPIKE is severity=medium.",
+      "title": "Anomaly Breakdown by Type",
+      "description": "Distribution of anomaly types within the selected time range. HIGH_HEART_RATE and LOW_HEART_RATE are severity=high; SPIKE is severity=medium.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "PCC52D03280B7034C"
@@ -111,7 +111,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT anomaly_type, count(*) AS count FROM anomalies WHERE event_time > now() - interval '1 hour' GROUP BY anomaly_type ORDER BY count DESC",
+          "rawSql": "SELECT anomaly_type, count(*) AS count FROM anomalies WHERE $__timeFilter(event_time) GROUP BY anomaly_type ORDER BY count DESC",
           "datasource": {
             "type": "grafana-postgresql-datasource",
             "uid": "PCC52D03280B7034C"
@@ -128,8 +128,8 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Average Heart Rate (Last 5 min)",
-      "description": "Population-wide mean heart rate across all customers in the most recent 5-minute window.",
+      "title": "Average Heart Rate",
+      "description": "Population-wide mean heart rate across all customers in the selected time range.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "PCC52D03280B7034C"
@@ -138,7 +138,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT round(avg(heart_rate)::numeric, 1)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '5 minutes'",
+          "rawSql": "SELECT round(avg(heart_rate)::numeric, 1)::double precision AS value FROM heartbeat_events WHERE $__timeFilter(event_time)",
           "datasource": {
             "type": "grafana-postgresql-datasource",
             "uid": "PCC52D03280B7034C"
@@ -182,7 +182,7 @@
     {
       "id": 5,
       "type": "stat",
-      "title": "p95 Heart Rate (Last 5 min)",
+      "title": "p95 Heart Rate",
       "description": "95th percentile heart rate — the threshold below which 95% of readings fall. High values indicate widespread elevated activity.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
@@ -192,7 +192,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY heart_rate)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '5 minutes'",
+          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY heart_rate)::double precision AS value FROM heartbeat_events WHERE $__timeFilter(event_time)",
           "datasource": {
             "type": "grafana-postgresql-datasource",
             "uid": "PCC52D03280B7034C"
@@ -232,8 +232,8 @@
     {
       "id": 6,
       "type": "stat",
-      "title": "Active Customers (Last 10 min)",
-      "description": "Number of distinct customers who sent at least one reading in the last 10 minutes. Sudden drops may indicate producer or Kafka issues.",
+      "title": "Active Customers",
+      "description": "Number of distinct customers who sent at least one reading in the selected time range. Sudden drops may indicate producer or Kafka issues.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "PCC52D03280B7034C"
@@ -242,7 +242,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT count(DISTINCT customer_id)::double precision AS value FROM heartbeat_events WHERE event_time > now() - interval '10 minutes'",
+          "rawSql": "SELECT count(DISTINCT customer_id)::double precision AS value FROM heartbeat_events WHERE $__timeFilter(event_time)",
           "datasource": {
             "type": "grafana-postgresql-datasource",
             "uid": "PCC52D03280B7034C"
