@@ -47,6 +47,7 @@ DEM10/
 ├── docker-compose.yml              ← Root-level compose file (use this)
 ├── .env.example                    ← Copy to .env before running
 ├── requirements.txt
+├── test_validate.py                ← Quick manual validation sanity check
 ├── flink/
 │   ├── Dockerfile                  ← Custom Flink image (PyFlink + JDBC/Kafka JARs)
 │   ├── conf/flink-conf.yaml        ← Flink cluster configuration
@@ -60,7 +61,9 @@ DEM10/
 │   │   ├── models.py               ← HeartbeatEvent, AnomalyEvent, InvalidEvent
 │   │   ├── simulator.py            ← Physiologically realistic data generator
 │   │   ├── kafka_utils.py          ← Hardened producer/consumer factories
+│   │   ├── logging_config.py       ← Structured JSON logging setup
 │   │   └── db.py                   ← Connection pool + retry logic
+│   ├── generator/generate.py       ← CLI utility to print sample events (debugging)
 │   ├── producer/producer.py        ← Kafka producer (Prometheus + graceful shutdown)
 │   ├── consumer/consumer.py        ← [Legacy] Original Python DB writer (replaced by Flink)
 │   └── anomaly_detector/
@@ -71,7 +74,9 @@ DEM10/
 │   ├── unit/
 │   │   ├── test_generator.py       ← Simulator unit tests
 │   │   ├── test_validation.py      ← Model validation tests
-│   │   └── test_anomaly_rules.py   ← Anomaly rule engine tests
+│   │   ├── test_anomaly_rules.py   ← Anomaly rule engine tests
+│   │   ├── test_flink_validation.py ← Flink validation logic tests
+│   │   └── test_flink_anomaly_logic.py ← Flink anomaly logic tests
 │   ├── integration/
 │   │   └── test_db_connection.py   ← DB connectivity + schema tests
 │   └── load/
@@ -80,7 +85,10 @@ DEM10/
 │   ├── grafana/dashboards/         ← 14-panel dashboard (PostgreSQL + Flink metrics)
 │   └── prometheus/prometheus.yml   ← Scrape config (Producer + Flink)
 ├── scripts/create-topics.ps1       ← PowerShell topic creation helper
-└── docs/architecture/              ← Architecture docs + Mermaid diagrams
+└── docs/
+    ├── architecture/               ← Architecture docs + Mermaid diagrams
+    ├── runbooks/windows-notes.md   ← Windows-specific troubleshooting notes
+    └── screenshots/                ← Pipeline evidence screenshots
 ```
 
 ## Quick Start
@@ -122,10 +130,11 @@ docker compose ps
 
 Or manually:
 ```powershell
-docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.raw.v1     --partitions 24 --replication-factor 1
-docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.invalid.v1  --partitions 6  --replication-factor 1
-docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.anomaly.v1  --partitions 6  --replication-factor 1
-docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.dlq.v1      --partitions 6  --replication-factor 1
+docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.raw.v1       --partitions 24 --replication-factor 1
+docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.validated.v1 --partitions 24 --replication-factor 1
+docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.invalid.v1    --partitions 6  --replication-factor 1
+docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.anomaly.v1    --partitions 6  --replication-factor 1
+docker exec heartbeat-kafka kafka-topics --bootstrap-server localhost:19092 --create --if-not-exists --topic events.dlq.v1        --partitions 6  --replication-factor 1
 ```
 
 ### 4 – Run the pipeline
@@ -193,6 +202,12 @@ psql -h localhost -p 55432 -U $env:POSTGRES_USER -d $env:POSTGRES_DB -c "SELECT 
 | `ANOMALY_LOW_THRESHOLD` | `50` | Low-rate anomaly threshold |
 | `ANOMALY_HIGH_THRESHOLD` | `140` | High-rate anomaly threshold |
 | `ANOMALY_SPIKE_DELTA` | `30` | Spike anomaly delta threshold |
+| `DB_POOL_MIN` | `2` | Minimum idle connections in the DB pool |
+| `DB_POOL_MAX` | `10` | Maximum connections in the DB pool |
+| `LOG_LEVEL` | `INFO` | Root Python logging level (DEBUG/INFO/WARNING/ERROR) |
+| `PROMETHEUS_PORT` | `8000` | HTTP port for Prometheus /metrics endpoint |
+| `GF_ADMIN_USER` | `from .env` | Grafana admin username |
+| `GF_ADMIN_PASSWORD` | `from .env` | Grafana admin password |
 
 ## Service Endpoints
 
@@ -210,6 +225,8 @@ psql -h localhost -p 55432 -U $env:POSTGRES_USER -d $env:POSTGRES_DB -c "SELECT 
 ```powershell
 # Unit tests (no Docker required)
 pytest tests/unit -q -v
+# Covers: test_generator, test_validation, test_anomaly_rules,
+#         test_flink_validation, test_flink_anomaly_logic
 
 # Integration tests (requires Docker Compose running)
 pytest tests/integration -q -v
@@ -292,5 +309,5 @@ Simulation customer behavior is also configurable via `.env`: `SIM_DYNAMIC_CUSTO
 | Docker Compose | `docker-compose.yml` (root) |
 | Setup guide | This README |
 | Data-flow diagrams | `docs/architecture/` |
-| Sample outputs | `docs/screenshots/` (add after running) |
+| Sample outputs | `docs/screenshots/` |
 | Dashboard | Grafana at http://localhost:3000 |

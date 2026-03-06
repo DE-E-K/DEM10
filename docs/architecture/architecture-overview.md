@@ -138,6 +138,19 @@ sequenceDiagram
   - Publishes anomaly events to `events.anomaly.v1`.
   - Replaces the original Python anomaly detector (`services/anomaly_detector/detector.py`).
 
+### Shared Modules (`services/common/`)
+- `config.py` — Centralised, validated settings via pydantic-settings (env vars / `.env`).
+- `models.py` — Frozen Pydantic models: `HeartbeatEvent`, `AnomalyEvent`, `InvalidEvent`.
+- `simulator.py` — Physiologically realistic Gaussian-baseline heart-rate generator.
+- `kafka_utils.py` — Production-hardened Kafka producer/consumer factories.
+- `db.py` — psycopg `ConnectionPool` with exponential-backoff retry logic.
+- `logging_config.py` — Structured JSON logging (python-json-logger) for all services.
+
+### Utilities
+- **Generator CLI** (`services/generator/generate.py`)
+  - Prints 100 sample heartbeat events to stdout as JSON.
+  - Useful for debugging the simulator without starting the full pipeline.
+
 > **Legacy services retained**: The original Python consumer and anomaly detector
 > code remains in `services/consumer/` and `services/anomaly_detector/` for
 > reference, but they are no longer built or deployed via docker-compose.
